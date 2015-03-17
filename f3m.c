@@ -92,7 +92,7 @@ typedef struct vchn
 
 	uint8_t vib_offs;
 
-	uint8_t eft, efp, lefp;
+	uint8_t eft, efp, lefp, last_note;
 	uint8_t lins;
 	uint8_t mem_gxx, mem_hxx, mem_oxx;
 } vchn_s;
@@ -229,6 +229,7 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		vchn->eft = 0;
 		vchn->efp = 0;
 		vchn->lefp = 0;
+		vchn->last_note = 0;
 		vchn->lins = 0;
 
 		vchn->mem_gxx = 0;
@@ -538,7 +539,7 @@ static void f3m_player_play_newnote(player_s *player)
 		if(cv == 0) break;
 		vchn_s *vchn = &(player->vchn[cv&15]); // TODO proper channel map check?
 
-		uint8_t pnote = 0xFD;
+		uint8_t pnote = 0xFF;
 		uint8_t pins = 0x00;
 		uint8_t pvol = 0xFF;
 		uint8_t peft = 0x00;
@@ -568,7 +569,8 @@ static void f3m_player_play_newnote(player_s *player)
 		{
 			vchn->data = NULL;
 
-		} else if(pnote < 0x80 && (pins != 0 || vchn->lins != 0)) {
+		} else if((pnote < 0x80 && (pins != 0 || vchn->lins != 0))
+				|| (pnote == 0xFF && pins != 0)) {
 			int iidx = (pins == 0 ? vchn->lins : pins);
 			vchn->lins = iidx;
 			const ins_s *ins = player->modbase + (((uint32_t)(player->ins_para[iidx-1]))*16);
@@ -579,25 +581,31 @@ static void f3m_player_play_newnote(player_s *player)
 				: vchn->vol);
 			if(vchn->vol > 63) vchn->vol = 63; // lesser-known quirk
 
-			vchn->gxx_period = ((8363 * 16 * period_table[pnote&15]) / ins->c4freq)
-				>> (pnote>>4);
-			// TODO: verify if this is the case wrt note-end
-			if(vchn->data == NULL || (peft != ('G'-'A'+1) && peft != ('L'-'A'+1)))
+			// TODO: work out what happens on note end when ins but no note
+			if(vchn->data == NULL || pnote < 0x80)
 			{
-				vchn->period = vchn->gxx_period;
-				vchn->freq = f3m_calc_period_freq(vchn->period);
-				vchn->offs = 0;
-				vchn->vib_offs = 0; // TODO: find correct retrig point
-				retrig = 1;
-			}
+				int note = (pnote < 0x80 ? pnote : vchn->last_note);
+				vchn->last_note = note;
+				vchn->gxx_period = ((8363 * 16 * period_table[note&15]) / ins->c4freq)
+					>> (note>>4);
+				// TODO: verify if this is the case wrt note-end
+				if(vchn->data == NULL || (peft != ('G'-'A'+1) && peft != ('L'-'A'+1)))
+				{
+					vchn->period = vchn->gxx_period;
+					vchn->freq = f3m_calc_period_freq(vchn->period);
+					vchn->offs = 0;
+					vchn->vib_offs = 0; // TODO: find correct retrig point
+					retrig = 1;
+				}
 
-			vchn->data = player->modbase + para*16;
-			vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
-				? ins->lpend
-				: ins->len);
-			vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
-				? vchn->len - ins->lpbeg
-				: 0);
+				vchn->data = player->modbase + para*16;
+				vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
+					? ins->lpend
+					: ins->len);
+				vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
+					? vchn->len - ins->lpbeg
+					: 0);
+			}
 		}
 
 		if(pvol < 0x80)
