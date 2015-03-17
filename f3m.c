@@ -398,9 +398,10 @@ void f3m_effect_Hxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 
 	if(tick == 0)
 	{
-		lefp = (pefp != 0 ? pefp : vchn->mem_gxx);
+		lefp = pefp;
+		if((lefp&0x0F) == 0) lefp |= vchn->mem_hxx&0x0F;
+		if((lefp&0xF0) == 0) lefp |= vchn->mem_hxx&0xF0;
 		vchn->mem_hxx = lefp;
-		// TODO: check if Hxy has split hi/lo memory
 	} else {
 		lefp = vchn->mem_hxx;
 
@@ -469,9 +470,10 @@ void f3m_effect_Uxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 
 	if(tick == 0)
 	{
-		lefp = (pefp != 0 ? pefp : vchn->mem_gxx);
+		lefp = pefp;
+		if((lefp&0x0F) == 0) lefp |= vchn->mem_hxx&0x0F;
+		if((lefp&0xF0) == 0) lefp |= vchn->mem_hxx&0xF0;
 		vchn->mem_hxx = lefp;
-		// TODO: check if Hxy has split hi/lo memory
 	} else {
 		lefp = vchn->mem_hxx;
 
