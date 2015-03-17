@@ -10,10 +10,6 @@ MEMORY
 
 SECTIONS
 {
-	. = 0x0300C000;
-	.bss : {
-		*(.bss)
-	}
 
 	DISPCNT = 0x04000000;
 	DISPSTAT = 0x04000004;
@@ -103,6 +99,9 @@ SECTIONS
 	TM3CNT_L = 0x0400010C;
 	TM3CNT_H = 0x0400010E;
 
+	KEYINPUT = 0x04000130;
+	KEYCNT = 0x04000132;
+
 	IE = 0x04000200;
 	IF = 0x04000202;
 	WAITCNT = 0x04000204;
@@ -127,6 +126,17 @@ SECTIONS
 	VRAMTB64 = 0x06000000;
 	VRAMTO64 = 0x06010000;
 	VRAMHO64 = 0x06014000;
+
+	. = 0x0300D000;
+	.bss : {
+		*(.bss)
+	}
+	/*
+	. = 0x02000000;
+	.bss.1 : {
+		*(.slowmem)
+	}
+	*/
 
 	. = 0x03000000;
 	.main : {

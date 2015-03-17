@@ -90,6 +90,8 @@ typedef struct vchn
 
 	int8_t vol;
 
+	uint8_t vib_offs;
+
 	uint8_t eft, efp, lefp;
 	uint8_t lins;
 	uint8_t mem_gxx, mem_hxx, mem_oxx;
@@ -115,6 +117,18 @@ typedef struct player
 
 const uint32_t period_amiclk = 8363*1712-400;
 const uint16_t period_table[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
+
+// from ITTECH.TXT
+const int8_t sintab[64] = {
+	  0,  6, 12, 19, 24, 30, 36, 41,
+	 45, 49, 53, 56, 59, 61, 63, 64,
+	 64, 64, 63, 61, 59, 56, 53, 49,
+	 45, 41, 36, 30, 24, 19, 12,  6,
+	  0, -6,-12,-19,-24,-30,-36,-41,
+	-45,-49,-53,-56,-59,-61,-63,-64,
+	-64,-64,-63,-61,-59,-56,-53,-49,
+	-45,-41,-36,-30,-24,-19,-12, -6,
+};
 
 #ifdef F3M_ENABLE_DYNALOAD
 mod_s *f3m_mod_dynaload_filename(const char *fname)
@@ -210,6 +224,8 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		vchn->period = 0;
 		vchn->vol = 0;
 
+		vchn->vib_offs = 0;
+
 		vchn->eft = 0;
 		vchn->efp = 0;
 		vchn->lefp = 0;
@@ -237,6 +253,10 @@ static void f3m_player_eff_slide_vol(player_s *player, vchn_s *vchn, int isfirst
 		if(isfirst) samt = lefp >> 4;
 	} else if((lefp & 0xF0) == 0xF0) {
 		if(isfirst) samt = -(lefp & 0x0F);
+	} else {
+		// default: slide down on nonzero ticks
+		// SATELL.s3m relies on this
+		if(!isfirst) samt = -(lefp & 0x0F);
 	}
 
 	if(samt > 0)
@@ -253,6 +273,25 @@ static void f3m_player_eff_slide_period(vchn_s *vchn, int amt)
 {
 	vchn->period += amt;
 	vchn->freq = f3m_calc_period_freq(vchn->period);
+}
+
+static void f3m_player_eff_vibrato(vchn_s *vchn, int lefp, int shift)
+{
+	vchn->freq = f3m_calc_period_freq(vchn->period);
+
+	int vspeed = (lefp>>4);
+	int vdepth = (lefp&15)<<shift;
+
+	// TODO: support other waveforms
+
+	// TODO: find rounding + direction
+	int vval = sintab[vchn->vib_offs&63];
+	vval *= vdepth;
+	vval += (1<<(5-1));
+	vval >>= 5;
+
+	vchn->freq = f3m_calc_period_freq(vchn->period + vval);
+	vchn->vib_offs += vspeed;
 }
 
 void f3m_effect_nop(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
@@ -353,12 +392,31 @@ void f3m_effect_Gxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 	}
 }
 
+void f3m_effect_Hxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
+{
+	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
+
+	if(tick == 0)
+	{
+		lefp = (pefp != 0 ? pefp : vchn->mem_gxx);
+		vchn->mem_hxx = lefp;
+		// TODO: check if Hxy has split hi/lo memory
+	} else {
+		lefp = vchn->mem_hxx;
+
+		f3m_player_eff_vibrato(vchn, lefp, 2);
+	}
+}
+
 void f3m_effect_Kxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
 {
 	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
 
 	if(tick != 0)
-		f3m_player_eff_slide_vol(player, vchn, tick == 0);
+	{
+		f3m_effect_Hxx(player, vchn, tick, 0, 0);
+		f3m_effect_Dxx(player, vchn, tick, pefp, lefp);
+	}
 }
 
 void f3m_effect_Lxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
@@ -367,7 +425,7 @@ void f3m_effect_Lxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 
 	if(tick != 0)
 	{
-		f3m_effect_Gxx(player, vchn, tick, pefp, lefp);
+		f3m_effect_Gxx(player, vchn, tick, 0, 0);
 		f3m_effect_Dxx(player, vchn, tick, pefp, lefp);
 	}
 }
@@ -405,14 +463,31 @@ void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 	}
 }
 
+void f3m_effect_Uxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
+{
+	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
+
+	if(tick == 0)
+	{
+		lefp = (pefp != 0 ? pefp : vchn->mem_gxx);
+		vchn->mem_hxx = lefp;
+		// TODO: check if Hxy has split hi/lo memory
+	} else {
+		lefp = vchn->mem_hxx;
+
+		f3m_player_eff_vibrato(vchn, lefp, 0);
+	}
+}
+
+
 void (*(f3m_effect_tab[32]))(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp) = {
 	f3m_effect_nop, f3m_effect_Axx, f3m_effect_nop, f3m_effect_Cxx,
 	f3m_effect_Dxx, f3m_effect_Exx, f3m_effect_Fxx, f3m_effect_Gxx,
-	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_Kxx,
+	f3m_effect_Hxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Kxx,
 	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Oxx,
 
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_Sxx,
-	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
+	f3m_effect_nop, f3m_effect_Uxx, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 };
@@ -510,6 +585,7 @@ static void f3m_player_play_newnote(player_s *player)
 				vchn->period = vchn->gxx_period;
 				vchn->freq = f3m_calc_period_freq(vchn->period);
 				vchn->offs = 0;
+				vchn->vib_offs = 0; // TODO: find correct retrig point
 				retrig = 1;
 			}
 

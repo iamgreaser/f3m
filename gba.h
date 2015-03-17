@@ -14,10 +14,10 @@ extern volatile uint16_t BG2VOFS;
 extern volatile uint16_t BG3HOFS;
 extern volatile uint16_t BG3VOFS;
 
-extern volatile uint32_t BG2PA;
-extern volatile uint32_t BG2PB;
-extern volatile uint32_t BG2PC;
-extern volatile uint32_t BG2PD;
+extern volatile uint16_t BG2PA;
+extern volatile uint16_t BG2PB;
+extern volatile uint16_t BG2PC;
+extern volatile uint16_t BG2PD;
 extern volatile uint32_t BG2X;
 extern volatile uint16_t BG2X_L;
 extern volatile uint16_t BG2X_H;
@@ -85,6 +85,20 @@ extern volatile uint16_t TM2CNT_L;
 extern volatile uint16_t TM2CNT_H;
 extern volatile uint16_t TM3CNT_L;
 extern volatile uint16_t TM3CNT_H;
+
+extern volatile uint16_t KEYINPUT;
+extern volatile uint16_t KEYCNT;
+
+#define KEY_A 0x0001
+#define KEY_B 0x0002
+#define KEY_SELECT 0x0004
+#define KEY_START 0x0008
+#define KEY_RIGHT 0x0010
+#define KEY_LEFT 0x0020
+#define KEY_UP 0x0040
+#define KEY_DOWN 0x0080
+#define KEY_R 0x0100
+#define KEY_L 0x0200
 
 extern volatile uint16_t IE;
 extern volatile uint16_t IF;
