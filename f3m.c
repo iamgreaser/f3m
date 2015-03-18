@@ -91,6 +91,7 @@ typedef struct vchn
 	int8_t vol;
 
 	uint8_t vib_offs;
+	uint8_t rtg_count;
 
 	uint8_t eft, efp, lefp, last_note;
 	uint8_t lins;
@@ -221,6 +222,7 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		vchn->vol = 0;
 
 		vchn->vib_offs = 0;
+		vchn->rtg_count = 0;
 
 		vchn->eft = 0;
 		vchn->efp = 0;
@@ -472,6 +474,62 @@ void f3m_effect_Oxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 	}
 }
 
+void f3m_effect_Qxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
+{
+	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
+
+	// Notes:
+	// 1. When effect is not Qxy, rtg_count is reset.
+	// 2. Current y (from lefp, not special mem) is used as a threshold.
+	// 3. When y is exceeded, change vol according to current x.
+
+	int voldrop = (lefp>>4);
+	int rtick = (lefp&15);
+
+	if(rtick != 0 && vchn->rtg_count >= rtick)
+	{
+		// Retrigger
+		// TODO: work out what happens when we've already done a period or vol slide
+		// TODO: 
+		f3m_note_retrig(player, vchn);
+
+		if(voldrop < 8)
+		{
+			if(voldrop < 6)
+			{
+				vchn->vol -= (1<<voldrop);
+				if(vchn->vol < 0) vchn->vol = 0;
+			} else if(voldrop == 6) {
+				// *2/3, which according to FC is exactly the same as 5/8
+				vchn->vol = (vchn->vol*5)>>3;
+			} else {
+				// *1/2
+				vchn->vol = vchn->vol>>1;
+			}
+
+		} else {
+			voldrop -= 8;
+			if(voldrop < 6)
+			{
+				vchn->vol += (1<<voldrop);
+			} else if(voldrop == 6) {
+				// *3/2
+				vchn->vol = (vchn->vol*3)>>1;
+			} else {
+				// *2
+				vchn->vol = vchn->vol<<1;
+			}
+
+			// XXX: do we deal with the case where vol > 63 before doubling?
+			if(vchn->vol > 63) vchn->vol = 63;
+		}
+
+		vchn->rtg_count = 0;
+	}
+
+	vchn->rtg_count++;
+}
+
 void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
 {
 	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
@@ -521,7 +579,7 @@ void (*(f3m_effect_tab[32]))(player_s *player, vchn_s *vchn, int tick, int pefp,
 	f3m_effect_Hxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Kxx,
 	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Oxx,
 
-	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_Sxx,
+	f3m_effect_nop, f3m_effect_Qxx, f3m_effect_nop, f3m_effect_Sxx,
 	f3m_effect_nop, f3m_effect_Uxx, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
@@ -592,6 +650,7 @@ static void f3m_player_play_newnote(player_s *player)
 		{
 			peft = *(p++);
 			pefp = *(p++);
+			peft &= 0x1F;
 		}
 
 		vchn->eft = peft;
@@ -626,13 +685,25 @@ static void f3m_player_play_newnote(player_s *player)
 			}
 		}
 
+		if((peft == ('S'-'A'+1) && (lefp&0xF0) == 0xD0) && pnote >= 0x80)
+		{
+			// Cancel effect if no note to trigger (e.g. CLICK.S3M)
+			// TODO: Check if vol column has any effect
+			vchn->eft = 0;
+		}
+
 		if(pvol < 0x80)
 		{
 			vchn->vol = pvol;
 			if(vchn->vol > 63) vchn->vol = 63;
 		}
 
-		f3m_effect_tab[peft&31](player, vchn, 0, pefp, lefp);
+		if(peft != ('Q'-'A'+1))
+		{
+			vchn->rtg_count = 0;
+		}
+
+		f3m_effect_tab[peft](player, vchn, 0, pefp, lefp);
 	}
 
 	player->patptr = p;
