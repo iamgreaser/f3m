@@ -119,15 +119,11 @@ const uint32_t period_amiclk = 8363*1712-400;
 const uint16_t period_table[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
 
 // from ITTECH.TXT
-const int8_t sintab[64] = {
+static const int8_t f3m_sintab[64] = {
 	  0,  6, 12, 19, 24, 30, 36, 41,
 	 45, 49, 53, 56, 59, 61, 63, 64,
 	 64, 64, 63, 61, 59, 56, 53, 49,
 	 45, 41, 36, 30, 24, 19, 12,  6,
-	  0, -6,-12,-19,-24,-30,-36,-41,
-	-45,-49,-53,-56,-59,-61,-63,-64,
-	-64,-64,-63,-61,-59,-56,-53,-49,
-	-45,-41,-36,-30,-24,-19,-12, -6,
 };
 
 #ifdef F3M_ENABLE_DYNALOAD
@@ -286,13 +282,41 @@ static void f3m_player_eff_vibrato(vchn_s *vchn, int lefp, int shift)
 	// TODO: support other waveforms
 
 	// TODO: find rounding + direction
-	int vval = sintab[vchn->vib_offs&63];
+	int vval = f3m_sintab[vchn->vib_offs&31];
+	if(vchn->vib_offs & 32) vval = -vval;
 	vval *= vdepth;
 	vval += (1<<(5-1));
 	vval >>= 5;
 
 	vchn->freq = f3m_calc_period_freq(vchn->period + vval);
 	vchn->vib_offs += vspeed;
+}
+
+static void f3m_note_retrig(player_s *player, vchn_s *vchn)
+{
+	int iidx = vchn->lins;
+	const ins_s *ins = player->modbase + (((uint32_t)(player->ins_para[iidx-1]))*16);
+	uint32_t para = (((uint32_t)(ins->dat_para_h))<<16)|((uint32_t)(ins->dat_para));
+
+	int note = vchn->last_note;
+	vchn->gxx_period = ((8363 * 16 * period_table[note&15]) / ins->c4freq)
+		>> (note>>4);
+	// TODO: verify if this is the case wrt note-end
+	if(vchn->data == NULL || (vchn->eft != ('G'-'A'+1) && vchn->eft != ('L'-'A'+1)))
+	{
+		vchn->period = vchn->gxx_period;
+		vchn->freq = f3m_calc_period_freq(vchn->period);
+		vchn->offs = 0;
+		vchn->vib_offs = 0; // TODO: find correct retrig point
+	}
+
+	vchn->data = player->modbase + para*16;
+	vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
+		? ins->lpend
+		: ins->len);
+	vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
+		? vchn->len - ins->lpbeg
+		: 0);
 }
 
 void f3m_effect_nop(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
@@ -462,6 +486,14 @@ void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 				vchn->vol = 0;
 			}
 			break;
+
+		case 0xD:
+			// TODO confirm SD0 behaviour
+			if(tick != 0 && (lefp&0x0F) == tick)
+			{
+				f3m_note_retrig(player, vchn);
+			}
+			break;
 	}
 }
 
@@ -545,8 +577,6 @@ static void f3m_player_play_newnote(player_s *player)
 		uint8_t peft = 0x00;
 		uint8_t pefp = 0x00;
 
-		int retrig = 0;
-
 		if((cv & 0x20) != 0)
 		{
 			pnote = *(p++);
@@ -564,6 +594,11 @@ static void f3m_player_play_newnote(player_s *player)
 			pefp = *(p++);
 		}
 
+		vchn->eft = peft;
+		vchn->efp = pefp;
+		if(pefp != 0) vchn->lefp = pefp;
+		uint8_t lefp = vchn->lefp;
+
 		// TODO: DO THIS PROPERLY
 		if(pnote == 0xFE)
 		{
@@ -574,7 +609,6 @@ static void f3m_player_play_newnote(player_s *player)
 			int iidx = (pins == 0 ? vchn->lins : pins);
 			vchn->lins = iidx;
 			const ins_s *ins = player->modbase + (((uint32_t)(player->ins_para[iidx-1]))*16);
-			uint32_t para = (((uint32_t)(ins->dat_para_h))<<16)|((uint32_t)(ins->dat_para));
 
 			vchn->vol = (pvol != 0xFF ? pvol
 				: pins != 0 ? ins->vol
@@ -586,25 +620,9 @@ static void f3m_player_play_newnote(player_s *player)
 			{
 				int note = (pnote < 0x80 ? pnote : vchn->last_note);
 				vchn->last_note = note;
-				vchn->gxx_period = ((8363 * 16 * period_table[note&15]) / ins->c4freq)
-					>> (note>>4);
-				// TODO: verify if this is the case wrt note-end
-				if(vchn->data == NULL || (peft != ('G'-'A'+1) && peft != ('L'-'A'+1)))
-				{
-					vchn->period = vchn->gxx_period;
-					vchn->freq = f3m_calc_period_freq(vchn->period);
-					vchn->offs = 0;
-					vchn->vib_offs = 0; // TODO: find correct retrig point
-					retrig = 1;
-				}
 
-				vchn->data = player->modbase + para*16;
-				vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
-					? ins->lpend
-					: ins->len);
-				vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
-					? vchn->len - ins->lpbeg
-					: 0);
+				if(peft != ('S'-'A'+1) || (lefp&0xF0) != 0xD0)
+					f3m_note_retrig(player, vchn);
 			}
 		}
 
@@ -614,12 +632,6 @@ static void f3m_player_play_newnote(player_s *player)
 			if(vchn->vol > 63) vchn->vol = 63;
 		}
 
-		vchn->eft = peft;
-		vchn->efp = pefp;
-		if(pefp != 0)
-			vchn->lefp = pefp;
-
-		uint8_t lefp = vchn->lefp;
 		f3m_effect_tab[peft&31](player, vchn, 0, pefp, lefp);
 	}
 
