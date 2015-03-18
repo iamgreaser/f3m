@@ -555,6 +555,18 @@ void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 	}
 }
 
+void f3m_effect_Txx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
+{
+	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
+
+	if(pefp >= 33)
+	{
+		player->tempo = pefp;
+		player->tempo_samples = f3m_calc_tempo_samples(player->tempo);
+	}
+
+}
+
 void f3m_effect_Uxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
 {
 	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
@@ -580,7 +592,7 @@ void (*(f3m_effect_tab[32]))(player_s *player, vchn_s *vchn, int tick, int pefp,
 	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Oxx,
 
 	f3m_effect_nop, f3m_effect_Qxx, f3m_effect_nop, f3m_effect_Sxx,
-	f3m_effect_nop, f3m_effect_Uxx, f3m_effect_nop, f3m_effect_nop,
+	f3m_effect_Txx, f3m_effect_Uxx, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 	f3m_effect_nop, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 };
