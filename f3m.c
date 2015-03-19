@@ -789,7 +789,7 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 #else
 		int32_t vol = vchn->vol;
 #endif
-		int32_t freq = vchn->freq;
+		const int32_t freq = vchn->freq;
 		for(j = 0; j < blen;)
 		{
 			// Work out the time to the end of the sample
