@@ -19,6 +19,12 @@
 #ifndef F3M_CHNS
 #define F3M_CHNS 1
 #endif
+#ifndef F3M_VCHNS
+#define F3M_VCHNS 20
+#endif
+#define F3M_PRIO_NORMAL 50
+#define F3M_PRIO_MUSIC_OFF 100
+#define F3M_PRIO_MUSIC 0xFFFF
 
 #ifdef TARGET_GBA
 
@@ -81,12 +87,13 @@ typedef struct vchn
 	int32_t len;
 	int32_t len_loop;
 
+	int32_t period;
+	int32_t gxx_period;
+
 	int32_t freq;
 	int32_t offs;
 	uint16_t suboffs;
-
-	int32_t period;
-	int32_t gxx_period;
+	int16_t priority;
 
 	int8_t vol;
 
@@ -111,9 +118,10 @@ typedef struct player
 	int32_t cord, cpat, crow;
 	const uint8_t *patptr;
 
+	int sfxoffs;
 	int ccount;
 
-	vchn_s vchn[16];
+	vchn_s vchn[F3M_VCHNS];
 } player_s;
 
 const uint32_t period_amiclk = 8363*1712-400;
@@ -170,9 +178,8 @@ static int32_t f3m_calc_tempo_samples(int32_t tempo)
 	return (F3M_FREQ*10)/(tempo*4);
 }
 
-static int32_t f3m_calc_period_freq(int32_t period)
+static int32_t f3m_calc_freq(int32_t freq)
 {
-	int32_t freq = period_amiclk / period;
 #if F3M_FREQ == 32768
 	freq <<= 1;
 #else
@@ -183,6 +190,13 @@ static int32_t f3m_calc_period_freq(int32_t period)
 #endif
 #endif
 	return freq;
+
+}
+
+static int32_t f3m_calc_period_freq(int32_t period)
+{
+	int32_t freq = period_amiclk / period;
+	return f3m_calc_freq(freq);
 }
 
 void f3m_player_init(player_s *player, mod_s *mod)
@@ -205,8 +219,10 @@ void f3m_player_init(player_s *player, mod_s *mod)
 	player->cpat = 0;
 	player->crow = 64;
 	player->patptr = NULL;
+	player->sfxoffs = 0;
+	player->ccount = 16;
 
-	for(i = 0; i < 16; i++)
+	for(i = 0; i < F3M_VCHNS; i++)
 	{
 		vchn_s *vchn = &(player->vchn[i]);
 
@@ -217,7 +233,9 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		vchn->freq = 0;
 		vchn->offs = 0;
 		vchn->suboffs = 0;
+		vchn->priority = (i < player->ccount ? F3M_PRIO_MUSIC_OFF : 0);
 
+		vchn->gxx_period = 0;
 		vchn->period = 0;
 		vchn->vol = 0;
 
@@ -313,6 +331,7 @@ static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 	}
 
 	vchn->data = player->modbase + para*16;
+	vchn->priority = F3M_PRIO_MUSIC;
 	vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
 		? ins->lpend
 		: ins->len);
@@ -541,6 +560,7 @@ void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 			if(tick != 0 && (lefp&0x0F) == tick)
 			{
 				vchn->data = NULL;
+				vchn->priority = F3M_PRIO_MUSIC_OFF;
 				vchn->vol = 0;
 			}
 			break;
@@ -622,7 +642,7 @@ static void f3m_player_play_newnote(player_s *player)
 	}
 
 	// Clear vchn pattern data
-	for(i = 0; i < 16; i++)
+	for(i = 0; i < F3M_VCHNS; i++)
 	{
 		vchn_s *vchn = &(player->vchn[i]);
 		vchn->eft = 0x00;
@@ -674,6 +694,7 @@ static void f3m_player_play_newnote(player_s *player)
 		if(pnote == 0xFE)
 		{
 			vchn->data = NULL;
+			vchn->priority = F3M_PRIO_MUSIC_OFF;
 
 		} else if((pnote < 0x80 && (pins != 0 || vchn->lins != 0))
 				|| (pnote == 0xFF && pins != 0)) {
@@ -731,7 +752,7 @@ void f3m_player_play_newtick(player_s *player)
 		player->ctick = 0;
 		f3m_player_play_newnote(player);
 	} else {
-		for(i = 0; i < 16; i++)
+		for(i = 0; i < F3M_VCHNS; i++)
 		{
 			vchn_s *vchn = &(player->vchn[i]);
 
@@ -743,6 +764,54 @@ void f3m_player_play_newtick(player_s *player)
 		}
 
 	}
+}
+
+void f3m_sfx_play(player_s *player, int priority, const uint8_t *data, int len, int len_loop, int freq, int vol)
+{
+	int i;
+	vchn_s *vchn;
+	int got_vchn = 0;
+
+	// Scan for free channels
+	for(i = 0; i < F3M_VCHNS; i++)
+	{
+		vchn = &player->vchn[player->sfxoffs];
+		player->sfxoffs++;
+		if(player->sfxoffs >= F3M_VCHNS)
+			player->sfxoffs = 0;
+
+		if(vchn->priority == 0)
+		{
+			got_vchn = 1;
+			break;
+		}
+	}
+
+	// Scan for channels we can override
+	if(!got_vchn) for(i = 0; i < F3M_VCHNS; i++)
+	{
+		vchn = &player->vchn[player->sfxoffs];
+		player->sfxoffs++;
+		if(player->sfxoffs >= F3M_VCHNS)
+			player->sfxoffs = 0;
+
+		if(vchn->priority <= priority)
+		{
+			got_vchn = 1;
+			break;
+		}
+	}
+
+	if(!got_vchn) return;
+
+	// Set channel up to do our bidding
+	vchn->freq = f3m_calc_freq(freq);
+	vchn->data = data;
+	vchn->len = len;
+	vchn->len_loop = len_loop;
+	vchn->vol = vol;
+	vchn->priority = priority;
+	vchn->offs = 0;
 }
 
 void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
@@ -769,7 +838,7 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 		mbuf[i] = 0;
 	
 	// Do each channel
-	for(i = 0; i < 16; i++)
+	for(i = 0; i < F3M_VCHNS; i++)
 	{
 		vchn_s *vchn = &(player->vchn[i]);
 
@@ -875,6 +944,7 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 				if(vchn->len_loop == 0)
 				{
 					vchn->data = NULL;
+					vchn->priority = (i < player->ccount ? F3M_PRIO_MUSIC_OFF : 0);
 					break;
 				}
 
