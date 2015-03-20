@@ -363,6 +363,18 @@ void f3m_effect_Axx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 		player->speed = pefp;
 }
 
+void f3m_effect_Bxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
+{
+	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
+
+	if(tick == 0)
+	{
+		// TODO: handle Bxx/Cxx combined
+		player->cord = pefp-1;
+		player->crow = 64; 
+	}
+}
+
 void f3m_effect_Cxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
 {
 	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
@@ -600,7 +612,7 @@ void f3m_effect_Uxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 
 
 void (*(f3m_effect_tab[32]))(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp) = {
-	f3m_effect_nop, f3m_effect_Axx, f3m_effect_nop, f3m_effect_Cxx,
+	f3m_effect_nop, f3m_effect_Axx, f3m_effect_Bxx, f3m_effect_Cxx,
 	f3m_effect_Dxx, f3m_effect_Exx, f3m_effect_Fxx, f3m_effect_Gxx,
 	f3m_effect_Hxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Kxx,
 	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
