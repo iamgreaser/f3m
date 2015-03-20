@@ -327,6 +327,15 @@ static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 		vchn->period = vchn->gxx_period;
 		vchn->freq = f3m_calc_period_freq(vchn->period);
 		vchn->offs = 0;
+		if(vchn->eft == ('O'-'A'+1))
+		{
+			vchn->eft = 0;
+			int lefp = (vchn->efp != 0 ? vchn->efp : vchn->mem_oxx);
+			vchn->mem_oxx = lefp;
+			lefp <<= 8;
+			if(lefp < vchn->len)
+				vchn->offs = lefp;
+		}
 		vchn->vib_offs = 0; // TODO: find correct retrig point
 	}
 
@@ -477,22 +486,6 @@ void f3m_effect_Lxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 	}
 }
 
-void f3m_effect_Oxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
-{
-	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
-
-	if(tick == 0)
-	{
-		//if(retrig && vchn->data != NULL && (lefp<<8) < vchn->len)
-
-		// TODO: get info as to whether note retriggered or not
-		// (if it's even relevant?)
-		lefp = (pefp != 0 ? pefp : vchn->mem_oxx);
-		if(vchn->data != NULL && (lefp<<8) < vchn->len)
-			vchn->offs = lefp<<8;
-	}
-}
-
 void f3m_effect_Qxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
 {
 	(void)player; (void)vchn; (void)tick; (void)pefp; (void)lefp;
@@ -609,7 +602,7 @@ void (*(f3m_effect_tab[32]))(player_s *player, vchn_s *vchn, int tick, int pefp,
 	f3m_effect_nop, f3m_effect_Axx, f3m_effect_nop, f3m_effect_Cxx,
 	f3m_effect_Dxx, f3m_effect_Exx, f3m_effect_Fxx, f3m_effect_Gxx,
 	f3m_effect_Hxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Kxx,
-	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_Oxx,
+	f3m_effect_Lxx, f3m_effect_nop, f3m_effect_nop, f3m_effect_nop,
 
 	f3m_effect_nop, f3m_effect_Qxx, f3m_effect_nop, f3m_effect_Sxx,
 	f3m_effect_Txx, f3m_effect_Uxx, f3m_effect_nop, f3m_effect_nop,
