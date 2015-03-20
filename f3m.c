@@ -321,6 +321,16 @@ static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 	int note = vchn->last_note;
 	vchn->gxx_period = ((8363 * 16 * period_table[note&15]) / ins->c4freq)
 		>> (note>>4);
+
+	vchn->data = player->modbase + para*16;
+	vchn->priority = F3M_PRIO_MUSIC;
+	vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
+		? ins->lpend
+		: ins->len);
+	vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
+		? vchn->len - ins->lpbeg
+		: 0);
+
 	// TODO: verify if this is the case wrt note-end
 	if(vchn->data == NULL || (vchn->eft != ('G'-'A'+1) && vchn->eft != ('L'-'A'+1)))
 	{
@@ -338,15 +348,6 @@ static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 		}
 		vchn->vib_offs = 0; // TODO: find correct retrig point
 	}
-
-	vchn->data = player->modbase + para*16;
-	vchn->priority = F3M_PRIO_MUSIC;
-	vchn->len = (((ins->flags & 0x01) != 0) && ins->lpend < ins->len
-		? ins->lpend
-		: ins->len);
-	vchn->len_loop = (((ins->flags & 0x01) != 0) && ins->lpbeg < ins->len
-		? vchn->len - ins->lpbeg
-		: 0);
 }
 
 void f3m_effect_nop(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp)
