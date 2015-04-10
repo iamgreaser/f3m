@@ -124,4 +124,5 @@ extern uint32_t VRAMHO32[];
 extern uint64_t VRAMTB64[];
 extern uint64_t VRAMTO64[];
 extern uint64_t VRAMHO64[];
+extern uint16_t VOAM16[];
 
