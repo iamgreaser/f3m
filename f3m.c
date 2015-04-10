@@ -173,6 +173,15 @@ void f3m_mod_free(mod_s *mod)
 }
 #endif
 
+static uint16_t f3m_get_para(const uint16_t *p)
+{
+	const uint8_t *p2 = (const uint16_t *)p;
+	uint16_t v0 = p2[0];
+	uint16_t v1 = p2[1];
+
+	return (v1<<8)|v0;
+}
+
 static int32_t f3m_calc_tempo_samples(int32_t tempo)
 {
 	return (F3M_FREQ*10)/(tempo*4);
@@ -315,7 +324,7 @@ static void f3m_player_eff_vibrato(vchn_s *vchn, int lefp, int shift)
 static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 {
 	int iidx = vchn->lins;
-	const ins_s *ins = player->modbase + (((uint32_t)(player->ins_para[iidx-1]))*16);
+	const ins_s *ins = player->modbase + (((uint32_t)(f3m_get_para(&player->ins_para[iidx-1])))*16);
 	uint32_t para = (((uint32_t)(ins->dat_para_h))<<16)|((uint32_t)(ins->dat_para));
 
 	int note = vchn->last_note;
@@ -643,7 +652,7 @@ static void f3m_player_play_newnote(player_s *player)
 		assert(player->cpat < player->mod->pat_num);
 
 		// Get new pattern pointer
-		player->patptr = player->modbase + (((uint32_t)(player->pat_para[player->cpat]))*16);
+		player->patptr = player->modbase + (((uint32_t)(f3m_get_para(&player->pat_para[player->cpat])))*16);
 		player->patptr += 2;
 	}
 
@@ -706,7 +715,7 @@ static void f3m_player_play_newnote(player_s *player)
 				|| (pnote == 0xFF && pins != 0)) {
 			int iidx = (pins == 0 ? vchn->lins : pins);
 			vchn->lins = iidx;
-			const ins_s *ins = player->modbase + (((uint32_t)(player->ins_para[iidx-1]))*16);
+			const ins_s *ins = player->modbase + (((uint32_t)(f3m_get_para(&player->ins_para[iidx-1])))*16);
 
 			vchn->vol = (pvol != 0xFF ? pvol
 				: pins != 0 ? ins->vol
