@@ -175,7 +175,7 @@ void f3m_mod_free(mod_s *mod)
 
 static uint16_t f3m_get_para(const uint16_t *p)
 {
-	const uint8_t *p2 = (const uint16_t *)p;
+	const uint8_t *p2 = (const uint8_t *)p;
 	uint16_t v0 = p2[0];
 	uint16_t v1 = p2[1];
 
@@ -644,8 +644,12 @@ static void f3m_player_play_newnote(player_s *player)
 
 		// Advance order
 		player->cord++;
+		while(player->cord < player->mod->ord_num && player->ord_list[player->cord] == 0xFE)
+			player->cord++;
 		if(player->cord >= player->mod->ord_num || player->ord_list[player->cord] == 0xFF)
 			player->cord = 0;
+		while(player->cord < player->mod->ord_num && player->ord_list[player->cord] == 0xFE)
+			player->cord++;
 
 		player->cpat = player->ord_list[player->cord];
 		assert(player->cpat < 200);
