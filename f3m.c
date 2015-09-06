@@ -25,7 +25,11 @@
 //define F3M_BUFLEN 273
 #endif
 #ifndef F3M_CHNS
+#ifdef TARGET_GBA
 #define F3M_CHNS 1
+#else
+#define F3M_CHNS 2
+#endif
 #endif
 #ifndef F3M_VCHNS
 #define F3M_VCHNS 20
@@ -44,7 +48,7 @@ void __assert_func(const char *a, int b, const char *c, const char *d)
 #endif
 
 // for -O3
-#if 1
+#if 0
 void *memset(void *b, int c, size_t len)
 {
 	size_t i;
@@ -96,6 +100,7 @@ typedef struct vchn
 {
 #ifdef TARGET_PSX
 	uint16_t spu_data;
+	uint16_t spu_data_lpbeg;
 #else
 	const uint8_t *data;
 #endif
@@ -111,6 +116,7 @@ typedef struct vchn
 	int16_t priority;
 
 	int8_t vol;
+	uint8_t pan;
 
 	uint8_t vib_offs;
 	uint8_t rtg_count;
@@ -138,6 +144,7 @@ typedef struct player
 
 #ifdef TARGET_PSX
 	uint16_t psx_spu_offset[99];
+	uint16_t psx_spu_offset_lpbeg[99];
 #endif
 
 	vchn_s vchn[F3M_VCHNS];
@@ -231,6 +238,11 @@ void f3m_player_init(player_s *player, mod_s *mod)
 {
 	int i;
 
+#ifdef TARGET_PSX
+	// Optional callback
+	update_music_status(0, mod->ins_num);
+#endif
+
 	player->mod = mod;
 	player->modbase = (const void *)mod;
 	player->ord_list = (const uint8_t *)(((const char *)(mod+1)));
@@ -270,6 +282,11 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		vchn->gxx_period = 0;
 		vchn->period = 0;
 		vchn->vol = 0;
+		vchn->pan = ((mod->mvol&0x80)==0)
+			? 0x8
+			: (mod->defpanFC == 0xFC
+				? ((const uint8_t *)(player->pat_para + mod->pat_num))[i] & 0xF
+				: ((i&1)?0xC:0x3));
 
 		vchn->vib_offs = 0;
 		vchn->rtg_count = 0;
@@ -287,29 +304,36 @@ void f3m_player_init(player_s *player, mod_s *mod)
 
 #ifdef TARGET_PSX
 	int j, k;
+	volatile int lag;
 
 	//volatile uint16_t *butt = (volatile uint16_t *)0x80100000;
 	//*(butt++) = 0x1234;
 
 	// load samples
 	for(i = 0; i < 99; i++)
+	{
 		player->psx_spu_offset[i] = 0;
+		player->psx_spu_offset_lpbeg[i] = 0;
+	}
 
-	uint16_t spu_offset = 0x01000>>3;
+	uint16_t spu_offs = 0x01000>>3;
 	uint16_t smp_data_buf[8];
 	int smp_src_buf[28];
 	int smp_data_last = 0;
 
 	// FIXME: mednafen will murder you if write your SPU loading code like this and from what I gather so will a real PSX - pcsxr laps it up w/o any issues for some reason
 	SPU_MEM_CNT = 0x0004;
+	for(lag = 0; lag < 0x1000; lag++) ;
 	SPU_CNT = 0x0000;
 	//while((SPU_STAT & 0x3F) != 0x00) ;
-	SPU_MEM_ADDR = spu_offset;
+	for(lag = 0; lag < 0x1000; lag++) ;
+	SPU_MEM_ADDR = spu_offs;
+	for(lag = 0; lag < 0x1000; lag++) ;
 
 	for(i = 0; i < 99 && i < mod->ins_num; i++)
 	{
+		update_music_status(i, mod->ins_num);
 		// TODO: subtly adjust samples so loops work properly
-		// TODO: actually use loops
 
 		// Get instrument + check if valid
 		const ins_s *ins = ((void *)mod) + (((uint32_t)(f3m_get_para(&player->ins_para[i])))*16);
@@ -317,9 +341,17 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		if(ins->len == 0 || para == 0)
 			continue;
 
+		int lpbeg = (((ins->flags & 0x01) != 0) ? ins->lpbeg : ins->len + 64);
+		int lpend = (((ins->flags & 0x01) != 0) ? ins->lpend+1 : ins->len + 64);
+		// Ensure the loop actually fires
+		// Not sure if the assurance is really that good here!
+		if((ins->flags & 0x01) != 0 && lpend > ins->len-14)
+			lpend = ins->len-14;
+
 		const uint8_t *data = ((void *)mod) + (para*16);
-		player->psx_spu_offset[i] = spu_offset;
-		for(j = 0; j < 64000 && j < ins->len; j += 28, data += 28, spu_offset += (0x10>>3))
+		player->psx_spu_offset[i] = spu_offs;
+		player->psx_spu_offset_lpbeg[i] = spu_offs;
+		for(j = 0; j < 64000 && j < ins->len; j += 28, data += 28, spu_offs += (0x10>>3))
 		{
 			// Load data
 			int src_min = smp_data_last;
@@ -337,16 +369,25 @@ void f3m_player_init(player_s *player, mod_s *mod)
 			int src_range = src_max - src_min;
 			int shift = 0;
 			while(src_range >= 16 && shift < 12)
+			{
 				shift++;
+				src_range >>= 1;
+			}
 
 			// Clear old buffer
 			for(k = 0; k < 8; k++)
 				smp_data_buf[k] = 0;
 
 			// Set header
-			// applying filter 1 to scrape away some of our terrible noise
-			// (are we even doing shift properly?)
+			// applying filter 1 so we get a delta + soft LPF
 			smp_data_buf[0] = (12-shift) | (1<<4) | ((0x00)<<8);
+			if(j+14 >= lpbeg && j-14 < lpbeg)
+			{
+				smp_data_buf[0] |= 0x0400;
+				player->psx_spu_offset_lpbeg[i] = spu_offs;
+			}
+			if(j+14 >= lpend && j-14 < lpend)
+				smp_data_buf[0] |= 0x0300;
 
 			// Add data
 			for(k = 0; k < 28; k++)
@@ -358,19 +399,8 @@ void f3m_player_init(player_s *player, mod_s *mod)
 				if(v >  7) v =  7;
 
 				smp_data_buf[1+(k>>2)] |= ((v&15)<<((k&3)<<2));
-				smp_data_last += v<<shift;
+				smp_data_last += (v<<shift);
 			}
-
-			/*
-			*(volatile int *)0x80100000 = *(uint32_t *)&ins->len;
-			*(volatile int *)0x80100010 = (int)&ins->len;
-			*(volatile int *)0x80100004 = i;
-			*(volatile int *)0x80100008 = spu_offset;
-			*(volatile int *)0x8010000C = (int)(mod);
-			*(volatile int *)0x80100014 = *(uint32_t *)&mod->ins_num;
-			*(volatile int *)0x80100018 = (int)(player);
-			*(volatile int *)0x8010001C = (int)(fsys_s3m_test);
-			*/
 
 			// Upload data
 			//for(k = 0; k < 8; k++) *(butt++) = smp_data_buf[k];
@@ -388,7 +418,7 @@ void f3m_player_init(player_s *player, mod_s *mod)
 		SPU_CNT = 0x0010;
 		//while((SPU_STAT & 0x3F) != 0x10) ;
 		while((SPU_STAT & 0x0400) != 0) ;
-		spu_offset += 0x10>>3;
+		spu_offs += 0x10>>3;
 	}
 #endif
 }
@@ -463,6 +493,7 @@ static void f3m_note_retrig(player_s *player, vchn_s *vchn)
 
 #ifdef TARGET_PSX
 	vchn->spu_data = player->psx_spu_offset[iidx-1];
+	vchn->spu_data_lpbeg = player->psx_spu_offset_lpbeg[iidx-1];
 #else
 	vchn->data = player->modbase + para*16;
 #endif
@@ -708,6 +739,14 @@ void f3m_effect_Sxx(player_s *player, vchn_s *vchn, int tick, int pefp, int lefp
 
 	switch(lefp>>4)
 	{
+		case 0x8:
+			if(tick == 0)
+			if((player->mod->mvol&0x80)!=0)
+			{
+				vchn->pan = lefp & 0x0F;
+			}
+			break;
+
 		case 0xC:
 			// TODO confirm SC0 behaviour
 			if(tick != 0 && (lefp&0x0F) == tick)
@@ -1029,6 +1068,12 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 #if F3M_CHNS == 2
 		int32_t lvol = vchn->vol;
 		int32_t rvol = vchn->vol;
+		if(vchn->pan < 0x8)
+		{
+			lvol = (lvol*vchn->pan*2)/15;
+		} else {
+			rvol = (lvol*(15-vchn->pan)*2)/15;
+		}
 #else
 		int32_t vol = vchn->vol;
 #endif
@@ -1149,6 +1194,7 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 #else
 	// TARGET_PSX.
 	// We need to use hardware channels for this.
+	uint32_t kon_mask = 0;
 
 	for(i = 0; i < F3M_VCHNS; i++)
 	{
@@ -1169,28 +1215,37 @@ void f3m_player_play(player_s *player, int32_t *mbuf, uint8_t *obuf)
 
 		// Output sample
 		uint16_t spu_offs = vchn->spu_data;
+		uint16_t spu_offs_lpbeg = vchn->spu_data_lpbeg;
 		int32_t offs = vchn->offs;
 		int32_t suboffs = vchn->suboffs;
 		int32_t len = vchn->len;
-		int32_t lvol = vchn->vol;
-		int32_t rvol = vchn->vol;
+		int32_t lvol = vchn->vol<<7;
+		int32_t rvol = vchn->vol<<7;
+		if(vchn->pan < 0x8)
+		{
+			lvol = (lvol*(vchn->pan*2+1))/15;
+		} else {
+			rvol = (rvol*((15-vchn->pan)*2+1))/15;
+		}
 		const int32_t freq = vchn->freq;
 
 		if((vchn->offs & 1) == 0)
 		{
-			SPU_KOFF = (1<<i);
-			SPU_n_START(i) = spu_offs;
-			SPU_n_REPEAT(i) = spu_offs;
+			SPU_n_START(i) = spu_offs + (((offs+14)/28)<<1);
+			SPU_n_REPEAT(i) = spu_offs_lpbeg;
 			SPU_n_ADSR(i) = 0x9FC083FF;
-			SPU_KON = (1<<i);
+			//SPU_KON = (1<<i);
+			kon_mask |= (1<<i);
 			vchn->offs |= 1;
 		}
 
-		SPU_n_MVOL_L(i) = lvol<<7;
-		SPU_n_MVOL_R(i) = rvol<<7;
+		SPU_n_MVOL_L(i) = lvol;
+		SPU_n_MVOL_R(i) = rvol;
 		SPU_n_PITCH(i) = freq>>4;
 
 	}
+
+	SPU_KON = kon_mask;
 
 #endif
 }
