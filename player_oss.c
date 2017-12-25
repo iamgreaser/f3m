@@ -14,6 +14,8 @@
 #include <sys/soundcard.h>
 
 #define F3M_ENABLE_DYNALOAD
+#define F3M_FREQ   48000
+#define F3M_BUFLEN (48000/500)
 #include "f3m.c"
 
 static int32_t mbuf[F3M_BUFLEN*F3M_CHNS];

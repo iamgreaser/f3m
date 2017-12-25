@@ -1044,11 +1044,14 @@ static void f3m_player_play_newnote(player_s *player)
 			const ins_s *ins = player->modbase + (((uint32_t)(f3m_get_para(&player->ins_para[iidx-1])))*16);
 
 			// TODO: work out correct rounding
-			vchn->insvol = (pvol != 0xFF ? pvol
-				: pins != 0 ? ins->vol
-				: vchn->insvol);
-			if(vchn->insvol > 63) vchn->insvol = 63; // lesser-known quirk
-			vchn->midvol = vchn->insvol;
+			if(pvol != 0xFF || pins != 0)
+			{
+				vchn->insvol = (pvol != 0xFF ? pvol
+					: pins != 0 ? ins->vol
+					: vchn->insvol);
+				if(vchn->insvol > 63) vchn->insvol = 63; // lesser-known quirk
+				vchn->midvol = vchn->insvol;
+			}
 
 			// TODO: work out what happens on note end when ins but no note
 #ifdef TARGET_PSX
